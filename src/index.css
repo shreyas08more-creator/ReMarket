@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Eco Green palette */
+  --color-eco-50: #f1f9e8;
+  --color-eco-100: #e0f0c8;
+  --color-eco-200: #c6e29a;
+  --color-eco-300: #a8d266;
+  --color-eco-400: #82c43c;
+  --color-eco-500: #5fa826;
+  --color-eco-600: #4a8a1c;
+  --color-eco-700: #3a6d18;
+  --color-eco-800: #2f5617;
+  --color-eco-900: #284917;
+
+  /* Light surface greens */
+  --color-surface-50: #f4f7f4;
+  --color-surface-100: #e8f5e9;
+  --color-surface-200: #d4ebd6;
+
+  /* Accent gold */
+  --color-gold-400: #ffd24d;
+  --color-gold-500: #ffc107;
+  --color-gold-600: #e6a700;
+
+  /* Neutral / dark text */
+  --color-ink-900: #1a202c;
+  --color-ink-700: #2d3748;
+  --color-ink-500: #4a5568;
+  --color-ink-300: #a0aec0;
+
+  /* Semantic */
+  --color-success: #82c43c;
+  --color-warning: #ffc107;
+  --color-error: #e53e3e;
+  --color-info: #3182ce;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --radius-card: 1rem;
+  --shadow-soft: 0 2px 8px rgba(34, 74, 23, 0.06), 0 1px 2px rgba(34, 74, 23, 0.04);
+  --shadow-card: 0 4px 16px rgba(34, 74, 23, 0.08), 0 2px 4px rgba(34, 74, 23, 0.04);
+  --shadow-lifted: 0 12px 32px rgba(34, 74, 23, 0.12), 0 4px 8px rgba(34, 74, 23, 0.06);
+}
+
+html {
+  font-family: var(--font-sans);
+  background-color: var(--color-surface-50);
+  color: var(--color-ink-900);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Smooth focus rings */
+*:focus-visible {
+  outline: 2px solid var(--color-eco-400);
+  outline-offset: 2px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface-100);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-eco-200);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-eco-300);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.96); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-pop-in {
+  animation: pop-in 0.25s ease-out both;
+}
+
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, var(--color-surface-100) 0%, var(--color-surface-200) 50%, var(--color-surface-100) 100%);
+  background-size: 1000px 100%;
+  animation: shimmer 1.6s infinite linear;
+}
