@@ -66,27 +66,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function signUp(email: string, password: string, role: UserRole, fullName: string) {
-    const { data, error } = await supabase.auth.signUp({
+    // Pass metadata directly in options.data so the DB trigger receives it
+    const { error } = await supabase.auth.signUp({
       email,
       password,
-    });
-    if (error) return { error: error.message };
-
-    const user = data.user;
-    if (user) {
-      // Wait a moment for auth to settle, then create profile
-      await new Promise(r => setTimeout(r, 500));
-      
-      const { error: profileError } = await supabase.from('profiles').upsert(
-        {
-          id: user.id,
-          user_type: role,
+      options: {
+        data: {
           full_name: fullName,
+          role: role,
+          user_type: role,
         },
-        { onConflict: 'id' }
-      );
-      if (profileError) return { error: profileError.message };
-    }
+      },
+    });
+
+    if (error) return { error: error.message };
     return { error: null };
   }
 
