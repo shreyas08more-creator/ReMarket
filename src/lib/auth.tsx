@@ -69,17 +69,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { user_type: role, full_name: fullName } },
     });
     if (error) return { error: error.message };
 
     const user = data.user;
     if (user) {
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: user.id,
-        user_type: role,
-        full_name: fullName,
-      });
+      // Wait a moment for auth to settle, then create profile
+      await new Promise(r => setTimeout(r, 500));
+      
+      const { error: profileError } = await supabase.from('profiles').upsert(
+        {
+          id: user.id,
+          user_type: role,
+          full_name: fullName,
+        },
+        { onConflict: 'id' }
+      );
       if (profileError) return { error: profileError.message };
     }
     return { error: null };

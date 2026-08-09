@@ -93,7 +93,7 @@ All tables have RLS enabled. Policies follow ownership / role rules:
 -- =========================================================
 CREATE TABLE IF NOT EXISTS profiles (
   id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  user_type text NOT NULL CHECK (user_type IN ('customer', 'vendor')),
+  user_type text NOT NULL DEFAULT 'customer' CHECK (user_type IN ('customer', 'vendor')),
   full_name text,
   avatar_url text,
   phone text,
@@ -118,6 +118,44 @@ USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 DROP POLICY IF EXISTS "profiles_insert_own" ON profiles;
 CREATE POLICY "profiles_insert_own"
 ON profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
+
+ALTER TABLE profiles ALTER COLUMN user_type SET DEFAULT 'customer';
+UPDATE profiles SET user_type = 'customer' WHERE user_type IS NULL;
+
+CREATE OR REPLACE FUNCTION public.create_profile_from_auth_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO profiles (
+    id,
+    user_type,
+    full_name,
+    avatar_url,
+    phone,
+    address,
+    eco_points,
+    kg_recycled,
+    co2_saved_kg,
+    created_at
+  ) VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'user_type', 'customer'),
+    NEW.raw_user_meta_data->>'full_name',
+    NEW.raw_user_meta_data->>'avatar_url',
+    NEW.raw_user_meta_data->>'phone',
+    NEW.raw_user_meta_data->>'address',
+    0,
+    0,
+    0,
+    now()
+  ) ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS create_profile_on_user_signup ON auth.users;
+CREATE TRIGGER create_profile_on_user_signup
+AFTER INSERT ON auth.users
+FOR EACH ROW EXECUTE FUNCTION public.create_profile_from_auth_user();
 
 -- =========================================================
 -- waste_listings

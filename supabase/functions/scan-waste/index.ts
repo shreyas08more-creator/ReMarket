@@ -6,17 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? '';
-const GEMINI_MODEL = 'gemini-2.0-flash';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-);
-
-// Rough buy-back rate table (currency-agnostic baseline) used when no vendor
-// rate is available yet. Values are per kg.
 const BASELINE_RATES: Record<string, number> = {
   'Plastic PET': 0.4,
   'Plastic HDPE': 0.35,
@@ -30,7 +19,16 @@ const BASELINE_RATES: Record<string, number> = {
   'Organic': 0.05,
   'Textile': 0.25,
   'Wood': 0.3,
+  'Mixed': 0.15, // Added missing material key
 };
+
+interface GeminiPayload {
+  material_type?: string;
+  title?: string;
+  estimated_weight_kg?: number | string;
+  confidence?: number | string;
+  notes?: string;
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -39,25 +37,39 @@ Deno.serve(async (req: Request) => {
 
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
-    const token = authHeader.replace('Bearer ', '');
+    const token = authHeader.replace('Bearer ', '').trim();
     if (!token) {
       return jsonResponse({ error: 'Missing authorization token' }, 401);
     }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: userData, error: userError } = await supabase.auth.getUser(token);
     if (userError || !userData.user) {
       return jsonResponse({ error: 'Invalid or expired session' }, 401);
     }
 
-    const body = await req.json();
-    const { imageBase64, mimeType } = body as { imageBase64?: string; mimeType?: string };
+    let body: { imageBase64?: string; mimeType?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return jsonResponse({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const { imageBase64, mimeType } = body;
     if (!imageBase64 || !mimeType) {
       return jsonResponse({ error: 'imageBase64 and mimeType are required' }, 400);
     }
 
-    if (!GEMINI_API_KEY) {
-      return jsonResponse({ error: 'Gemini API key not configured. Add GEMINI_API_KEY as an edge function secret.' }, 500);
+    const geminiKey = Deno.env.get('GEMINI_API_KEY');
+    if (!geminiKey) {
+      return jsonResponse({ error: 'Gemini API key not configured.' }, 500);
     }
+
+    // Strip Data URL prefix if present
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
     const prompt = `You are a waste-classification assistant for a recycling marketplace.
 Analyze this image of waste material and respond ONLY with a JSON object (no markdown, no prose) with these exact fields:
@@ -69,7 +81,9 @@ Analyze this image of waste material and respond ONLY with a JSON object (no mar
   "notes": a one-sentence note about condition or handling
 }`;
 
-    const geminiRes = await fetch(GEMINI_ENDPOINT, {
+    const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+
+    const geminiRes = await fetch(geminiEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -77,11 +91,15 @@ Analyze this image of waste material and respond ONLY with a JSON object (no mar
           {
             parts: [
               { text: prompt },
-              { inline_data: { mime_type: mimeType, data: imageBase64 } },
+              { inline_data: { mime_type: mimeType, data: cleanBase64 } },
             ],
           },
         ],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 400, responseMimeType: 'application/json' },
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 400,
+          responseMimeType: 'application/json',
+        },
       }),
     });
 
@@ -96,36 +114,40 @@ Analyze this image of waste material and respond ONLY with a JSON object (no mar
       return jsonResponse({ error: 'Gemini returned no content' }, 502);
     }
 
-    let parsed: {
-      material_type: string;
-      title: string;
-      estimated_weight_kg: number;
-      confidence: number;
-      notes: string;
-    };
+    let parsed: GeminiPayload = {};
     try {
-      parsed = JSON.parse(text);
+      const rawText = text.replace(/```json|```/g, '').trim();
+      const match = rawText.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(match ? match[0] : rawText);
     } catch {
-      // Fallback: try to extract JSON substring
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) return jsonResponse({ error: 'Could not parse Gemini response as JSON' }, 502);
-      parsed = JSON.parse(match[0]);
+      return jsonResponse({ error: 'Could not parse Gemini response as valid JSON' }, 502);
     }
 
-    // Derive an estimated price from baseline rates
-    const rate = BASELINE_RATES[parsed.material_type] ?? BASELINE_RATES['Mixed'] ?? 0.2;
-    const estimated_price = Math.max(0, Number((rate * (parsed.estimated_weight_kg || 1)).toFixed(2)));
+    // Safe number parsing
+    const rawWeight = typeof parsed.estimated_weight_kg === 'number'
+      ? parsed.estimated_weight_kg
+      : parseFloat(String(parsed.estimated_weight_kg ?? '1'));
+    const estimated_weight_kg = !isNaN(rawWeight) && rawWeight > 0 ? rawWeight : 1;
+
+    const rawConfidence = typeof parsed.confidence === 'number'
+      ? parsed.confidence
+      : parseFloat(String(parsed.confidence ?? '0'));
+    const confidence = !isNaN(rawConfidence) ? Math.min(Math.max(rawConfidence, 0), 1) : 0;
+
+    const materialType = parsed.material_type ?? 'Unknown';
+    const rate = BASELINE_RATES[materialType] ?? BASELINE_RATES['Mixed'] ?? 0.2;
+    const estimated_price = Math.max(0, Number((rate * estimated_weight_kg).toFixed(2)));
 
     return jsonResponse({
-      material_type: parsed.material_type ?? 'Unknown',
+      material_type: materialType,
       title: parsed.title ?? 'Waste item',
-      estimated_weight_kg: Number(parsed.estimated_weight_kg) || 1,
+      estimated_weight_kg,
       estimated_price,
-      confidence: Number(parsed.confidence) || 0,
+      confidence,
       notes: parsed.notes ?? '',
     });
   } catch (err) {
-    return jsonResponse({ error: (err as Error).message ?? 'Internal error' }, 500);
+    return jsonResponse({ error: (err as Error).message ?? 'Internal server error' }, 500);
   }
 });
 
