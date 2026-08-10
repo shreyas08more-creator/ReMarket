@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Sparkles, Clock, CheckCircle2, Truck, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Sparkles, Clock, CheckCircle2, Truck, Trash2, Loader2, MessageSquare } from 'lucide-react';
 import { supabase, type WasteListing } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { Card, CardHeader, CardBody } from '../components/Card';
@@ -17,7 +17,6 @@ export function CustomerDashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [step, setStep] = useState<Step>('scan');
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
-  const [scanImage, setScanImage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,14 +43,12 @@ export function CustomerDashboard() {
   function openScanner() {
     setStep('scan');
     setScanResult(null);
-    setScanImage(null);
     setError(null);
     setModalOpen(true);
   }
 
-  function handleScanned(result: ScanResult, imageUrl: string) {
+  function handleScanned(result: ScanResult) {
     setScanResult(result);
-    setScanImage(imageUrl);
     setStep('review');
   }
 
@@ -61,7 +58,6 @@ export function CustomerDashboard() {
     description: string;
     estimated_weight_kg: number;
     estimated_price: number;
-    image_url: string;
   }) {
     if (!user) return;
     setSubmitting(true);
@@ -71,7 +67,6 @@ export function CustomerDashboard() {
       title: values.title,
       material_type: values.material_type,
       description: values.description,
-      image_url: values.image_url,
       estimated_weight_kg: values.estimated_weight_kg,
       estimated_price: values.estimated_price,
       status: 'pending',
@@ -152,8 +147,8 @@ export function CustomerDashboard() {
         {step === 'scan' && (
           <div>
             <div className="flex items-center gap-2 mb-4 text-sm text-ink-500">
-              <Sparkles className="h-4 w-4 text-eco-400" />
-              Upload a photo and our AI will identify the material and estimate its weight and buy-back price.
+              <MessageSquare className="h-4 w-4 text-eco-400" />
+              Describe your waste item and our AI will identify the material and estimate its weight and buy-back price.
             </div>
             <WasteScanner onScanned={handleScanned} />
           </div>
@@ -161,7 +156,6 @@ export function CustomerDashboard() {
         {step === 'review' && scanResult && (
           <ListingForm
             initial={scanResult}
-            imageUrl={scanImage}
             onSubmit={handleSubmitListing}
             onCancel={() => setModalOpen(false)}
             submitting={submitting}
@@ -195,14 +189,11 @@ function StatusBadge({ status }: { status: WasteListing['status'] }) {
 function ListingCard({ listing, onDelete }: { listing: WasteListing; onDelete: () => void }) {
   return (
     <div className="rounded-xl border border-eco-100 bg-white overflow-hidden group transition-all hover:shadow-card">
-      <div className="aspect-video bg-surface-100 overflow-hidden">
-        {listing.image_url ? (
-          <img src={listing.image_url} alt={listing.title} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-ink-300">
-            <Sparkles className="h-8 w-8" />
-          </div>
-        )}
+      <div className="aspect-video bg-gradient-to-br from-eco-50 to-surface-100 overflow-hidden flex items-center justify-center">
+        <div className="text-center px-4">
+          <MessageSquare className="h-8 w-8 mx-auto text-eco-300" />
+          <p className="text-xs text-ink-400 mt-1.5 line-clamp-2">{listing.description || listing.title}</p>
+        </div>
       </div>
       <div className="p-3">
         <div className="flex items-start justify-between gap-2">

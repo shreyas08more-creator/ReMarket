@@ -70,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signUp({
       email,
       password,
+<<<<<<< HEAD
       options: {
         data: {
           full_name: fullName,
@@ -80,6 +81,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (error) return { error: error.message };
+=======
+      options: { data: { user_type: role, full_name: fullName } },
+    });
+    if (error) return { error: error.message };
+
+    const user = data.user;
+    if (user) {
+      const { error: profileError } = await supabase.from('profiles').insert({
+        id: user.id,
+        user_type: role,
+        full_name: fullName,
+      });
+      if (profileError) return { error: profileError.message };
+    }
+>>>>>>> 1cd6e047864e2e8d0faf926782484edc249d3f16
     return { error: null };
   }
 

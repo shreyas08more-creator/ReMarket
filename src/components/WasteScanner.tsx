@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { Upload, Camera, Sparkles, X, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Sparkles, X, Loader2, MessageSquare } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Button } from './Button';
 import { Input, Textarea, Label, Select } from './Field';
@@ -18,43 +18,21 @@ const MATERIALS = [
   'Steel', 'Glass', 'Electronics', 'Organic', 'Textile', 'Wood', 'Mixed', 'Unknown',
 ];
 
-export function WasteScanner({ onScanned }: { onScanned: (result: ScanResult, imageUrl: string) => void }) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [mimeType, setMimeType] = useState<string | null>(null);
+const EXAMPLES = [
+  'A pile of about 20 plastic water bottles',
+  'Old laptop, broken screen, maybe 2 kg',
+  'Stack of cardboard boxes from moving',
+  'A bag of aluminum soda cans, roughly 50 cans',
+];
+
+export function WasteScanner({ onScanned }: { onScanned: (result: ScanResult) => void }) {
+  const [description, setDescription] = useState('');
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleFile(file: File) {
-    setError(null);
-    if (!file.type.startsWith('image/')) {
-      setError('Please select an image file.');
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      setError('Image must be under 8 MB.');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setPreview(dataUrl);
-      const base64 = dataUrl.split(',')[1] ?? '';
-      setImageBase64(base64);
-      setMimeType(file.type);
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-  }
-
   async function runScan() {
-    if (!imageBase64 || !mimeType) {
-      setError('Add an image first.');
+    if (!description.trim()) {
+      setError('Describe your waste item first.');
       return;
     }
     setScanning(true);
@@ -74,14 +52,14 @@ export function WasteScanner({ onScanned }: { onScanned: (result: ScanResult, im
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ imageBase64, mimeType }),
+        body: JSON.stringify({ description }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `Scan failed (${res.status})`);
       }
       const data = (await res.json()) as ScanResult;
-      onScanned(data, preview ?? '');
+      onScanned(data);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -89,56 +67,37 @@ export function WasteScanner({ onScanned }: { onScanned: (result: ScanResult, im
     }
   }
 
-  function reset() {
-    setPreview(null);
-    setImageBase64(null);
-    setMimeType(null);
-    setError(null);
-    if (fileRef.current) fileRef.current.value = '';
-  }
-
   return (
     <div className="space-y-4">
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPick} className="hidden" />
+      <div>
+        <Label htmlFor="description">Describe your waste item</Label>
+        <Textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="e.g. A pile of about 20 plastic water bottles"
+          rows={4}
+          autoFocus
+        />
+      </div>
 
-      {!preview ? (
-        <div
-          onClick={() => fileRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const file = e.dataTransfer.files?.[0];
-            if (file) handleFile(file);
-          }}
-          className="cursor-pointer rounded-2xl border-2 border-dashed border-eco-200 bg-surface-50 hover:bg-surface-100 hover:border-eco-300 transition-colors p-10 text-center"
-        >
-          <div className="h-14 w-14 mx-auto rounded-full bg-eco-100 flex items-center justify-center text-eco-500 mb-3">
-            <Camera className="h-7 w-7" />
-          </div>
-          <p className="font-semibold text-ink-900">Capture or upload a waste photo</p>
-          <p className="text-sm text-ink-500 mt-1">AI will identify the material and estimate its value</p>
-          <div className="flex items-center justify-center gap-2 mt-4">
-            <Button type="button" size="sm" variant="secondary"><Upload className="h-4 w-4" /> Choose file</Button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="relative rounded-2xl overflow-hidden border border-eco-100">
-            <img src={preview} alt="Waste preview" className="w-full max-h-64 object-cover" />
-            <button
-              onClick={reset}
-              className="absolute top-2 right-2 p-1.5 rounded-full bg-white/90 hover:bg-white text-ink-700 shadow-soft"
-              aria-label="Remove image"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <Button type="button" onClick={runScan} loading={scanning} size="lg" className="w-full">
-            {!scanning && <Sparkles className="h-4 w-4" />}
-            {scanning ? 'Scanning with AI…' : 'Scan with AI'}
-          </Button>
-        </div>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            type="button"
+            onClick={() => setDescription(ex)}
+            className="px-3 py-1.5 rounded-full text-xs font-medium bg-surface-100 text-ink-600 hover:bg-eco-100 hover:text-eco-700 transition-colors"
+          >
+            {ex}
+          </button>
+        ))}
+      </div>
+
+      <Button type="button" onClick={runScan} loading={scanning} size="lg" className="w-full">
+        {!scanning && <Sparkles className="h-4 w-4" />}
+        {scanning ? 'Analyzing with AI…' : 'Analyze with AI'}
+      </Button>
 
       {error && <p className="text-sm font-medium text-red-500">{error}</p>}
     </div>
@@ -147,14 +106,12 @@ export function WasteScanner({ onScanned }: { onScanned: (result: ScanResult, im
 
 export function ListingForm({
   initial,
-  imageUrl,
   onSubmit,
   onCancel,
   submitting,
 }: {
   initial: ScanResult;
-  imageUrl: string | null;
-  onSubmit: (values: { title: string; material_type: string; description: string; estimated_weight_kg: number; estimated_price: number; image_url: string }) => void;
+  onSubmit: (values: { title: string; material_type: string; description: string; estimated_weight_kg: number; estimated_price: number }) => void;
   onCancel: () => void;
   submitting: boolean;
 }) {
@@ -174,7 +131,6 @@ export function ListingForm({
           description,
           estimated_weight_kg: Number(weight) || 0,
           estimated_price: Number(price) || 0,
-          image_url: imageUrl ?? '',
         });
       }}
       className="space-y-4"

@@ -6,6 +6,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
+const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ?? '';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+);
+
+// Rough buy-back rate table (currency-agnostic baseline) used when no vendor
+// rate is available yet. Values are per kg.
 const BASELINE_RATES: Record<string, number> = {
   'Plastic PET': 0.4,
   'Plastic HDPE': 0.35,
@@ -19,16 +30,12 @@ const BASELINE_RATES: Record<string, number> = {
   'Organic': 0.05,
   'Textile': 0.25,
   'Wood': 0.3,
-  'Mixed': 0.15, // Added missing material key
 };
 
-interface GeminiPayload {
-  material_type?: string;
-  title?: string;
-  estimated_weight_kg?: number | string;
-  confidence?: number | string;
-  notes?: string;
-}
+const VALID_MATERIALS = [
+  'Plastic PET', 'Plastic HDPE', 'Plastic', 'Cardboard', 'Paper', 'Aluminum',
+  'Steel', 'Glass', 'Electronics', 'Organic', 'Textile', 'Wood', 'Mixed', 'Unknown',
+];
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -37,117 +44,101 @@ Deno.serve(async (req: Request) => {
 
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
-    const token = authHeader.replace('Bearer ', '').trim();
+    const token = authHeader.replace('Bearer ', '');
     if (!token) {
       return jsonResponse({ error: 'Missing authorization token' }, 401);
     }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: userData, error: userError } = await supabase.auth.getUser(token);
     if (userError || !userData.user) {
       return jsonResponse({ error: 'Invalid or expired session' }, 401);
     }
 
-    let body: { imageBase64?: string; mimeType?: string };
-    try {
-      body = await req.json();
-    } catch {
-      return jsonResponse({ error: 'Invalid JSON body' }, 400);
+    const body = await req.json();
+    const { description } = body as { description?: string };
+    if (!description || !description.trim()) {
+      return jsonResponse({ error: 'description is required' }, 400);
     }
 
-    const { imageBase64, mimeType } = body;
-    if (!imageBase64 || !mimeType) {
-      return jsonResponse({ error: 'imageBase64 and mimeType are required' }, 400);
+    if (!GROQ_API_KEY) {
+      return jsonResponse({ error: 'Groq API key not configured. Add GROQ_API_KEY as an edge function secret.' }, 500);
     }
 
-    const geminiKey = Deno.env.get('GEMINI_API_KEY');
-    if (!geminiKey) {
-      return jsonResponse({ error: 'Gemini API key not configured.' }, 500);
-    }
-
-    // Strip Data URL prefix if present
-    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-
-    const prompt = `You are a waste-classification assistant for a recycling marketplace.
-Analyze this image of waste material and respond ONLY with a JSON object (no markdown, no prose) with these exact fields:
+    const systemPrompt = `You are a waste-classification assistant for a recycling marketplace.
+The user will describe a waste item in plain language.
+Respond ONLY with a JSON object (no markdown, no prose) with these exact fields:
 {
-  "material_type": one of ["Plastic PET","Plastic HDPE","Plastic","Cardboard","Paper","Aluminum","Steel","Glass","Electronics","Organic","Textile","Wood","Mixed","Unknown"],
+  "material_type": one of ${JSON.stringify(VALID_MATERIALS)},
   "title": a short descriptive title for the listing (max 60 chars),
-  "estimated_weight_kg": a positive number estimating the weight in kg,
+  "estimated_weight_kg": a positive number estimating the weight in kg based on the description,
   "confidence": a number between 0 and 1 indicating classification confidence,
   "notes": a one-sentence note about condition or handling
 }`;
 
-    const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
-
-    const geminiRes = await fetch(geminiEndpoint, {
+    const groqRes = await fetch(GROQ_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+      },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType, data: cleanBase64 } },
-            ],
-          },
+        model: GROQ_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: description },
         ],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 400,
-          responseMimeType: 'application/json',
-        },
+        temperature: 0.2,
+        max_tokens: 400,
+        response_format: { type: 'json_object' },
       }),
     });
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      return jsonResponse({ error: `Gemini API error (${geminiRes.status}): ${errText}` }, 502);
+    if (!groqRes.ok) {
+      const errText = await groqRes.text();
+      return jsonResponse({ error: `Groq API error (${groqRes.status}): ${errText}` }, 502);
     }
 
-    const geminiJson = await geminiRes.json();
-    const text: string | undefined = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const groqJson = await groqRes.json();
+    const text: string | undefined = groqJson?.choices?.[0]?.message?.content;
     if (!text) {
-      return jsonResponse({ error: 'Gemini returned no content' }, 502);
+      return jsonResponse({ error: 'Groq returned no content' }, 502);
     }
 
-    let parsed: GeminiPayload = {};
+    let parsed: {
+      material_type: string;
+      title: string;
+      estimated_weight_kg: number;
+      confidence: number;
+      notes: string;
+    };
     try {
-      const rawText = text.replace(/```json|```/g, '').trim();
-      const match = rawText.match(/\{[\s\S]*\}/);
-      parsed = JSON.parse(match ? match[0] : rawText);
+      parsed = JSON.parse(text);
     } catch {
-      return jsonResponse({ error: 'Could not parse Gemini response as valid JSON' }, 502);
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return jsonResponse({ error: 'Could not parse Groq response as JSON' }, 502);
+      parsed = JSON.parse(match[0]);
     }
 
-    // Safe number parsing
-    const rawWeight = typeof parsed.estimated_weight_kg === 'number'
-      ? parsed.estimated_weight_kg
-      : parseFloat(String(parsed.estimated_weight_kg ?? '1'));
-    const estimated_weight_kg = !isNaN(rawWeight) && rawWeight > 0 ? rawWeight : 1;
+    // Normalize material type
+    let materialType = parsed.material_type ?? 'Unknown';
+    if (!VALID_MATERIALS.includes(materialType)) {
+      materialType = 'Unknown';
+    }
 
-    const rawConfidence = typeof parsed.confidence === 'number'
-      ? parsed.confidence
-      : parseFloat(String(parsed.confidence ?? '0'));
-    const confidence = !isNaN(rawConfidence) ? Math.min(Math.max(rawConfidence, 0), 1) : 0;
-
-    const materialType = parsed.material_type ?? 'Unknown';
-    const rate = BASELINE_RATES[materialType] ?? BASELINE_RATES['Mixed'] ?? 0.2;
-    const estimated_price = Math.max(0, Number((rate * estimated_weight_kg).toFixed(2)));
+    // Derive an estimated price from baseline rates
+    const rate = BASELINE_RATES[materialType] ?? 0.2;
+    const estimated_price = Math.max(0, Number((rate * (parsed.estimated_weight_kg || 1)).toFixed(2)));
 
     return jsonResponse({
       material_type: materialType,
       title: parsed.title ?? 'Waste item',
-      estimated_weight_kg,
+      estimated_weight_kg: Number(parsed.estimated_weight_kg) || 1,
       estimated_price,
-      confidence,
+      confidence: Number(parsed.confidence) || 0,
       notes: parsed.notes ?? '',
     });
   } catch (err) {
-    return jsonResponse({ error: (err as Error).message ?? 'Internal server error' }, 500);
+    return jsonResponse({ error: (err as Error).message ?? 'Internal error' }, 500);
   }
 });
 
