@@ -67,10 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signUp(email: string, password: string, role: UserRole, fullName: string) {
     // Pass metadata directly in options.data so the DB trigger receives it
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
-<<<<<<< HEAD
       options: {
         data: {
           full_name: fullName,
@@ -81,21 +80,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (error) return { error: error.message };
-=======
-      options: { data: { user_type: role, full_name: fullName } },
-    });
-    if (error) return { error: error.message };
 
+    // Fallback manual profile creation if no DB trigger is present
     const user = data.user;
     if (user) {
-      const { error: profileError } = await supabase.from('profiles').insert({
+      const { error: profileError } = await supabase.from('profiles').upsert({
         id: user.id,
         user_type: role,
         full_name: fullName,
       });
-      if (profileError) return { error: profileError.message };
+      if (profileError) console.warn('Profile creation fallback notice:', profileError.message);
     }
->>>>>>> 1cd6e047864e2e8d0faf926782484edc249d3f16
+
     return { error: null };
   }
 
