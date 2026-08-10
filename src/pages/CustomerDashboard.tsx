@@ -189,7 +189,7 @@ function StatusBadge({ status }: { status: WasteListing['status'] }) {
 function ListingCard({ listing, onDelete }: { listing: WasteListing; onDelete: () => void }) {
   return (
     <div className="rounded-xl border border-eco-100 bg-white overflow-hidden group transition-all hover:shadow-card">
-      <div className="aspect-video bg-gradient-to-br from-eco-50 to-surface-100 overflow-hidden flex items-center justify-center">
+      <div className="aspect-video bg-linear-to-br from-eco-50 to-surface-100 overflow-hidden flex items-center justify-center">
         <div className="text-center px-4">
           <MessageSquare className="h-8 w-8 mx-auto text-eco-300" />
           <p className="text-xs text-ink-400 mt-1.5 line-clamp-2">{listing.description || listing.title}</p>
