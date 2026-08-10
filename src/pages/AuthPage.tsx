@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Recycle, Store, Truck, Leaf } from 'lucide-react';
 import { useAuth } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 import type { UserRole } from '../lib/supabase';
 import { Button } from '../components/Button';
 import { Input, Label, FieldError } from '../components/Field';
@@ -33,7 +34,6 @@ export function AuthPage() {
         setLoading(false);
         return;
       }
-      // After signup, onAuthStateChange fires and routes via profile; redirect to dashboard
       const dest = role === 'vendor' ? '/vendor/dashboard' : '/customer/dashboard';
       navigate(dest, { replace: true });
     } else {
@@ -43,8 +43,19 @@ export function AuthPage() {
         setLoading(false);
         return;
       }
-      // Profile will load; redirect based on role once available — fallback to a generic dashboard
-      navigate('/', { replace: true });
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (userId) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('user_type')
+          .eq('id', userId)
+          .maybeSingle();
+        const dest = profile?.user_type === 'vendor' ? '/vendor/dashboard' : '/customer/dashboard';
+        navigate(dest, { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     }
   }
 

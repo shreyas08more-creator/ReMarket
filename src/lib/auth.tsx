@@ -67,11 +67,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signUp(email: string, password: string, role: UserRole, fullName: string) {
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: email.trim().toLowerCase(),
       password,
       options: { data: { user_type: role, full_name: fullName } },
     });
-    if (error) return { error: error.message };
+    if (error) return { error: formatAuthError(error.message) };
 
     const user = data.user;
     if (user) {
@@ -80,14 +80,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user_type: role,
         full_name: fullName,
       });
-      if (profileError) return { error: profileError.message };
+      if (profileError) {
+        if (profileError.code === '23505') {
+          return { error: null };
+        }
+        return { error: profileError.message };
+      }
     }
     return { error: null };
   }
 
   async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    if (error) return { error: formatAuthError(error.message) };
+    if (data.user) await loadProfile(data.user.id);
     return { error: null };
   }
 
@@ -112,4 +121,16 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
+}
+
+function formatAuthError(message: string): string {
+  const map: Record<string, string> = {
+    'Invalid login credentials': 'Email or password is incorrect. Please try again.',
+    'Email not confirmed': 'Please confirm your email before signing in.',
+    'User already registered': 'An account with this email already exists. Try signing in instead.',
+  };
+  for (const key of Object.keys(map)) {
+    if (message.includes(key)) return map[key];
+  }
+  return message;
 }
